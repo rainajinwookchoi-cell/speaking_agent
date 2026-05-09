@@ -1,0 +1,7 @@
+streamlit
+openai
+streamlit-mic-recorder
+feedparser
+beautifulsoup4
+requests
+python-dotenv
