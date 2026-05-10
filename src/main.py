@@ -9,6 +9,7 @@ import io
 import json
 import random
 import base64
+import datetime
 from dotenv import load_dotenv
 
 load_dotenv() # Load variables from .env file
@@ -103,6 +104,24 @@ def get_tts(text, api_key_str):
     )
     return tts_response.read()
 
+# History Management
+HISTORY_FILE = "history.json"
+
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            try:
+                return json.load(f)
+            except:
+                return []
+    return []
+
+def save_to_history(record):
+    history = load_history()
+    history.append(record)
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=4)
+
 # 2. State Management & Fetch News
 @st.cache_data(ttl=3600)
 def fetch_all_news_images():
@@ -145,117 +164,159 @@ def next_image():
 def retry_practice():
     st.session_state.retry_key += 1
 
-if news_items:
-    current_item = news_items[st.session_state.current_image_index]
-    image_url = current_item["url"]
-    news_title = current_item["title"]
-    
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.subheader("Image to Describe")
-        st.image(image_url, use_container_width=True, caption=news_title)
-        
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            st.button("🔄 Retry / Practice Again", on_click=retry_practice, use_container_width=True)
-        with col_btn2:
-            st.button("➡️ Next Image", on_click=next_image, use_container_width=True)
-        
-    with col2:
-        st.subheader("Your Description")
-        
-        recorder_key = f"recorder_{st.session_state.retry_key}"
-        audio_dict = mic_recorder(start_prompt="🎤 녹음 시작", stop_prompt="⏹️ 녹음 중지", key=recorder_key)
-        
-        if audio_dict is None:
-            st.info("🎤 준비 완료: 위의 마이크 버튼을 눌러 녹음을 시작하세요.")
-            audio_bytes = None
-        else:
-            st.success("✅ 녹음 완료! 데이터를 처리하는 중입니다...")
-            audio_bytes = audio_dict['bytes']
-        
-        if audio_bytes:
-            if not api_key:
-                st.error("Please enter your OpenAI API Key in the sidebar first.")
-            else:
-                st.audio(audio_bytes, format="audio/wav")
-                
-                try:
-                    with wave.open(io.BytesIO(audio_bytes), 'rb') as wav_file:
-                        frames = wav_file.getnframes()
-                        rate = wav_file.getframerate()
-                        duration_seconds = frames / float(rate)
-                except Exception:
-                    duration_seconds = 0
-                
-                # 4. Whisper Transcription
-                with st.spinner("Transcribing your speech..."):
-                    try:
-                        user_text = get_transcription(audio_bytes, api_key)
-                        st.success(f"**You said:** {user_text}")
-                    except Exception as e:
-                        st.error(f"Error during transcription: {e}")
-                        user_text = None
-                
-                # 5. GPT-4o Evaluation
-                if user_text:
-                    with st.spinner("AI is analyzing your description..."):
-                        try:
-                            raw_feedback, prompt_tokens, completion_tokens = get_evaluation(user_text, image_url, api_key)
-                            
-                            try:
-                                feedback_data = json.loads(raw_feedback)
-                                content_feedback = feedback_data.get('content_feedback', '')
-                                main_correction = feedback_data.get('main_correction', '')
-                                other_expressions = feedback_data.get('other_expressions', [])
-                            except json.JSONDecodeError:
-                                content_feedback = ""
-                                main_correction = raw_feedback
-                                other_expressions = []
-                            
-                            st.subheader("💡 Feedback & Suggestions")
-                            
-                            if content_feedback:
-                                st.markdown(f"**🔍 내용 피드백:**\n{content_feedback}")
-                            
-                            st.markdown(f"**🗣️ 모범 답안 (듣고 따라해 보세요!):**\n> {main_correction}")
-                            
-                            # Play main correction
-                            main_tts_bytes = get_tts(main_correction, api_key)
-                            st.audio(main_tts_bytes, format="audio/mp3", autoplay=True)
-                            
-                            if other_expressions:
-                                st.markdown("**✨ 유사한 표현들:**")
-                                for i, expr in enumerate(other_expressions):
-                                    col_play, col_text = st.columns([1, 10])
-                                    with col_play:
-                                        if st.button("▶️ 재생", key=f"play_expr_{i}_{st.session_state.retry_key}"):
-                                            with st.spinner(""):
-                                                expr_tts_bytes = get_tts(expr, api_key)
-                                                b64 = base64.b64encode(expr_tts_bytes).decode()
-                                                md = f"""
-                                                    <audio autoplay="true">
-                                                    <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-                                                    </audio>
-                                                    """
-                                                st.markdown(md, unsafe_allow_html=True)
-                                    with col_text:
-                                        st.markdown(f"- {expr}")
-                            
-                            # Cost Calculation
-                            st.markdown("---")
-                            whisper_cost = (duration_seconds / 60.0) * 0.006
-                            gpt_cost = (prompt_tokens / 1_000_000) * 5.0 + (completion_tokens / 1_000_000) * 15.0
-                            tts_cost = (len(main_correction) / 1000) * 0.015
-                            total_cost_usd = whisper_cost + gpt_cost + tts_cost
-                            total_cost_krw = total_cost_usd * 1350
-                            
-                            st.caption(f"💰 **Estimated Cost for this practice:** ${total_cost_usd:.4f} (약 {int(total_cost_krw)}원)")
-                            st.caption(f"*(Audio: {duration_seconds:.1f}s | Tokens: {prompt_tokens} in, {completion_tokens} out | Main TTS: {len(main_correction)} chars)*")
-                            
-                        except Exception as e:
-                            st.error(f"Error during AI analysis: {e}")
+tab_practice, tab_history = st.tabs(["🗣️ Practice", "📚 Review History"])
 
-else:
-    st.error("Failed to fetch news images from the RSS feed. Please try again later.")
+with tab_history:
+    st.header("📚 My Review History")
+    history_data = load_history()
+    if not history_data:
+        st.info("아직 저장된 복습 기록이 없습니다. Practice 탭에서 연습 후 저장해보세요!")
+    else:
+        for idx, item in enumerate(reversed(history_data)):
+            with st.expander(f"[{item['date']}] {item['main_correction'][:40]}..."):
+                col1, col2 = st.columns([1, 2])
+                with col1:
+                    st.image(item['image_url'], use_container_width=True)
+                with col2:
+                    st.markdown(f"**🗣️ My Speech:** {item['user_text']}")
+                    st.markdown(f"**🔍 Feedback:** {item['content_feedback']}")
+                    st.markdown(f"**✅ Correction:** {item['main_correction']}")
+                    st.markdown("**✨ Other Expressions:**")
+                    for expr in item['other_expressions']:
+                        st.markdown(f"- {expr}")
+
+with tab_practice:
+    if news_items:
+        current_item = news_items[st.session_state.current_image_index]
+        image_url = current_item["url"]
+        news_title = current_item["title"]
+        
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.subheader("Image to Describe")
+            st.image(image_url, use_container_width=True, caption=news_title)
+            
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                st.button("🔄 Retry / Practice Again", on_click=retry_practice, use_container_width=True)
+            with col_btn2:
+                st.button("➡️ Next Image", on_click=next_image, use_container_width=True)
+            
+        with col2:
+            st.subheader("Your Description")
+            
+            recorder_key = f"recorder_{st.session_state.retry_key}"
+            audio_dict = mic_recorder(start_prompt="🎤 녹음 시작", stop_prompt="⏹️ 녹음 중지", key=recorder_key)
+            
+            if audio_dict is None:
+                st.info("🎤 준비 완료: 위의 마이크 버튼을 눌러 녹음을 시작하세요.")
+                audio_bytes = None
+            else:
+                st.success("✅ 녹음 완료! 데이터를 처리하는 중입니다...")
+                audio_bytes = audio_dict['bytes']
+            
+            if audio_bytes:
+                if not api_key:
+                    st.error("Please enter your OpenAI API Key in the sidebar first.")
+                else:
+                    st.audio(audio_bytes, format="audio/wav")
+                    
+                    try:
+                        with wave.open(io.BytesIO(audio_bytes), 'rb') as wav_file:
+                            frames = wav_file.getnframes()
+                            rate = wav_file.getframerate()
+                            duration_seconds = frames / float(rate)
+                    except Exception:
+                        duration_seconds = 0
+                    
+                    # 4. Whisper Transcription
+                    with st.spinner("Transcribing your speech..."):
+                        try:
+                            user_text = get_transcription(audio_bytes, api_key)
+                            st.success(f"**You said:** {user_text}")
+                        except Exception as e:
+                            st.error(f"Error during transcription: {e}")
+                            user_text = None
+                    
+                    # 5. GPT-4o Evaluation
+                    if user_text:
+                        with st.spinner("AI is analyzing your description..."):
+                            try:
+                                raw_feedback, prompt_tokens, completion_tokens = get_evaluation(user_text, image_url, api_key)
+                                
+                                try:
+                                    feedback_data = json.loads(raw_feedback)
+                                    content_feedback = feedback_data.get('content_feedback', '')
+                                    main_correction = feedback_data.get('main_correction', '')
+                                    other_expressions = feedback_data.get('other_expressions', [])
+                                except json.JSONDecodeError:
+                                    content_feedback = ""
+                                    main_correction = raw_feedback
+                                    other_expressions = []
+                                
+                                st.subheader("💡 Feedback & Suggestions")
+                                
+                                if content_feedback:
+                                    st.markdown(f"**🔍 내용 피드백:**\n{content_feedback}")
+                                
+                                st.markdown(f"**🗣️ 모범 답안 (듣고 따라해 보세요!):**\n> {main_correction}")
+                                
+                                # Play main correction
+                                main_tts_bytes = get_tts(main_correction, api_key)
+                                st.audio(main_tts_bytes, format="audio/mp3", autoplay=True)
+                                
+                                if other_expressions:
+                                    st.markdown("**✨ 유사한 표현들:**")
+                                    for i, expr in enumerate(other_expressions):
+                                        col_play, col_text = st.columns([1, 10])
+                                        with col_play:
+                                            if st.button("▶️ 재생", key=f"play_expr_{i}_{st.session_state.retry_key}"):
+                                                with st.spinner(""):
+                                                    expr_tts_bytes = get_tts(expr, api_key)
+                                                    b64 = base64.b64encode(expr_tts_bytes).decode()
+                                                    md = f"""
+                                                        <audio autoplay="true">
+                                                        <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                                                        </audio>
+                                                        """
+                                                    st.markdown(md, unsafe_allow_html=True)
+                                        with col_text:
+                                            st.markdown(f"- {expr}")
+                                
+                                # History Save Feature
+                                st.markdown("---")
+                                def handle_save_history(record):
+                                    save_to_history(record)
+                                    st.session_state[f"saved_{st.session_state.retry_key}"] = True
+                                
+                                is_saved = st.session_state.get(f"saved_{st.session_state.retry_key}", False)
+                                if not is_saved:
+                                    record = {
+                                        "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                        "image_url": image_url,
+                                        "user_text": user_text,
+                                        "content_feedback": content_feedback,
+                                        "main_correction": main_correction,
+                                        "other_expressions": other_expressions
+                                    }
+                                    st.button("💾 이 피드백을 복습 기록에 저장하기", on_click=handle_save_history, args=(record,), use_container_width=True)
+                                else:
+                                    st.success("✅ 복습 기록에 성공적으로 저장되었습니다! 화면 상단의 '📚 Review History' 탭에서 확인하세요.")
+                                
+                                # Cost Calculation
+                                st.markdown("---")
+                                whisper_cost = (duration_seconds / 60.0) * 0.006
+                                gpt_cost = (prompt_tokens / 1_000_000) * 5.0 + (completion_tokens / 1_000_000) * 15.0
+                                tts_cost = (len(main_correction) / 1000) * 0.015
+                                total_cost_usd = whisper_cost + gpt_cost + tts_cost
+                                total_cost_krw = total_cost_usd * 1350
+                                
+                                st.caption(f"💰 **Estimated Cost for this practice:** ${total_cost_usd:.4f} (약 {int(total_cost_krw)}원)")
+                                st.caption(f"*(Audio: {duration_seconds:.1f}s | Tokens: {prompt_tokens} in, {completion_tokens} out | Main TTS: {len(main_correction)} chars)*")
+                                
+                            except Exception as e:
+                                st.error(f"Error during AI analysis: {e}")
+    
+    else:
+        st.error("Failed to fetch news images from the RSS feed. Please try again later.")
