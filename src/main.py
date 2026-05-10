@@ -7,6 +7,7 @@ import os
 import wave
 import io
 import json
+import random
 from dotenv import load_dotenv
 
 load_dotenv() # Load variables from .env file
@@ -39,13 +40,29 @@ with st.sidebar:
 # 2. State Management & Fetch News
 @st.cache_data(ttl=3600)
 def fetch_all_news_images():
-    feed_url = 'http://feeds.bbci.co.uk/news/rss.xml'
-    feed = feedparser.parse(feed_url)
+    feed_urls = [
+        'http://feeds.bbci.co.uk/news/world/rss.xml',                   # 세계 주요 사건/사고
+        'http://feeds.bbci.co.uk/news/science_and_environment/rss.xml', # 과학, 환경, 자연
+        'https://www.theguardian.com/environment/rss',                  # 환경, 풍경, 동물
+        'https://www.theguardian.com/science/rss',                      # 우주, 과학, 자연
+        'https://rss.nytimes.com/services/xml/rss/nyt/World.xml'        # 뉴욕타임스 세계 주요 뉴스
+    ]
+    
     items = []
-    for entry in feed.entries:
-        if 'media_thumbnail' in entry and len(entry.media_thumbnail) > 0:
-            img_url = entry.media_thumbnail[0]['url']
-            items.append({"url": img_url, "title": entry.title})
+    for url in feed_urls:
+        feed = feedparser.parse(url)
+        for entry in feed.entries:
+            img_url = None
+            if 'media_content' in entry and len(entry.media_content) > 0:
+                img_url = entry.media_content[0].get('url')
+            elif 'media_thumbnail' in entry and len(entry.media_thumbnail) > 0:
+                img_url = entry.media_thumbnail[0].get('url')
+            
+            if img_url:
+                items.append({"url": img_url, "title": entry.title})
+                
+    # 다양한 주제의 사진이 섞여서 나오도록 셔플
+    random.shuffle(items)
     return items
 
 news_items = fetch_all_news_images()
