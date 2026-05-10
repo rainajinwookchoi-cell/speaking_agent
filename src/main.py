@@ -190,8 +190,18 @@ with tab_history:
                         st.audio(audio_bytes, format="audio/mp3")
                         
                     st.markdown("**✨ Other Expressions:**")
-                    for expr in item['other_expressions']:
-                        st.markdown(f"- {expr}")
+                    for i, expr in enumerate(item['other_expressions']):
+                        if item.get('other_tts_b64') and i < len(item['other_tts_b64']) and item['other_tts_b64'][i]:
+                            col_play, col_text = st.columns([1, 10])
+                            with col_play:
+                                if st.button("▶️ 재생", key=f"hist_play_{idx}_{i}"):
+                                    b64 = item['other_tts_b64'][i]
+                                    md = f"""<audio autoplay="true"><source src="data:audio/mp3;base64,{b64}" type="audio/mp3"></audio>"""
+                                    st.markdown(md, unsafe_allow_html=True)
+                            with col_text:
+                                st.markdown(f"- {expr}")
+                        else:
+                            st.markdown(f"- {expr}")
 
 with tab_practice:
     if news_items:
@@ -295,6 +305,15 @@ with tab_practice:
                                 # History Save Feature
                                 st.markdown("---")
                                 def handle_save_history(record):
+                                    other_tts_b64 = []
+                                    for expr in record.get("other_expressions", []):
+                                        try:
+                                            expr_tts_bytes = get_tts(expr, api_key)
+                                            other_tts_b64.append(base64.b64encode(expr_tts_bytes).decode('utf-8'))
+                                        except Exception:
+                                            other_tts_b64.append("")
+                                    record["other_tts_b64"] = other_tts_b64
+                                    
                                     save_to_history(record)
                                     st.session_state[f"saved_{st.session_state.retry_key}"] = True
                                 
