@@ -8,6 +8,7 @@ import wave
 import io
 import json
 import random
+import base64
 from dotenv import load_dotenv
 
 load_dotenv() # Load variables from .env file
@@ -37,15 +38,80 @@ with st.sidebar:
     st.markdown("4. Describe the photo in English.")
     st.markdown("5. Wait for the AI's feedback!")
 
+# Cached AI Functions
+@st.cache_data(show_spinner=False, max_entries=5)
+def get_transcription(audio_bytes, api_key_str):
+    client = OpenAI(api_key=api_key_str)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+        temp_audio.write(audio_bytes)
+        temp_audio_path = temp_audio.name
+    try:
+        with open(temp_audio_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1", 
+                file=audio_file,
+                language="en"
+            )
+        return transcript.text
+    finally:
+        if os.path.exists(temp_audio_path):
+            os.remove(temp_audio_path)
+
+@st.cache_data(show_spinner=False, max_entries=5)
+def get_evaluation(user_text, image_url, api_key_str):
+    client = OpenAI(api_key=api_key_str)
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are an encouraging English speaking tutor. "
+                    "The user is describing the provided image. "
+                    "Evaluate their description based on the image. "
+                    "Provide the response in JSON format strictly with the following three keys:\n"
+                    "1. 'content_feedback': A friendly feedback IN KOREAN evaluating how well their description matches the image, and kindly pointing out any important visual details they missed or described incorrectly.\n"
+                    "2. 'main_correction': A VERY CONCISE, natural-sounding improved version of their description in English. Focus ONLY on the corrected sentence so the user can easily repeat after you.\n"
+                    "3. 'other_expressions': A short list (array) of 2-3 other similar or useful English expressions."
+                )
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"Here is my transcription: '{user_text}'"},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": image_url,
+                        },
+                    },
+                ],
+            }
+        ],
+        max_tokens=400,
+    )
+    return response.choices[0].message.content, response.usage.prompt_tokens, response.usage.completion_tokens
+
+@st.cache_data(show_spinner=False, max_entries=20)
+def get_tts(text, api_key_str):
+    client = OpenAI(api_key=api_key_str)
+    tts_response = client.audio.speech.create(
+        model="tts-1",
+        voice="nova",
+        input=text
+    )
+    return tts_response.read()
+
 # 2. State Management & Fetch News
 @st.cache_data(ttl=3600)
 def fetch_all_news_images():
     feed_urls = [
-        'http://feeds.bbci.co.uk/news/world/rss.xml',                   # 세계 주요 사건/사고
-        'http://feeds.bbci.co.uk/news/science_and_environment/rss.xml', # 과학, 환경, 자연
-        'https://www.theguardian.com/environment/rss',                  # 환경, 풍경, 동물
-        'https://www.theguardian.com/science/rss',                      # 우주, 과학, 자연
-        'https://rss.nytimes.com/services/xml/rss/nyt/World.xml'        # 뉴욕타임스 세계 주요 뉴스
+        'http://feeds.bbci.co.uk/news/world/rss.xml',
+        'http://feeds.bbci.co.uk/news/science_and_environment/rss.xml',
+        'https://www.theguardian.com/environment/rss',
+        'https://www.theguardian.com/science/rss',
+        'https://rss.nytimes.com/services/xml/rss/nyt/World.xml'
     ]
     
     items = []
@@ -61,7 +127,6 @@ def fetch_all_news_images():
             if img_url:
                 items.append({"url": img_url, "title": entry.title})
                 
-    # 다양한 주제의 사진이 섞여서 나오도록 셔플
     random.shuffle(items)
     return items
 
@@ -75,10 +140,10 @@ if 'retry_key' not in st.session_state:
 
 def next_image():
     st.session_state.current_image_index = (st.session_state.current_image_index + 1) % len(news_items)
-    st.session_state.retry_key += 1 # Reset recorder state
+    st.session_state.retry_key += 1
 
 def retry_practice():
-    st.session_state.retry_key += 1 # Reset recorder state
+    st.session_state.retry_key += 1
 
 if news_items:
     current_item = news_items[st.session_state.current_image_index]
@@ -100,7 +165,6 @@ if news_items:
     with col2:
         st.subheader("Your Description")
         
-        # 3. Audio Recording Component
         recorder_key = f"recorder_{st.session_state.retry_key}"
         audio_dict = mic_recorder(start_prompt="🎤 녹음 시작", stop_prompt="⏹️ 녹음 중지", key=recorder_key)
         
@@ -117,7 +181,6 @@ if news_items:
             else:
                 st.audio(audio_bytes, format="audio/wav")
                 
-                # Calculate audio duration for cost estimation
                 try:
                     with wave.open(io.BytesIO(audio_bytes), 'rb') as wav_file:
                         frames = wav_file.getnframes()
@@ -126,67 +189,20 @@ if news_items:
                 except Exception:
                     duration_seconds = 0
                 
-                # Save audio to a temp file for Whisper
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
-                    temp_audio.write(audio_bytes)
-                    temp_audio_path = temp_audio.name
-                
-                client = OpenAI(api_key=api_key)
-                user_text = None
-                
                 # 4. Whisper Transcription
                 with st.spinner("Transcribing your speech..."):
                     try:
-                        with open(temp_audio_path, "rb") as audio_file:
-                            transcript = client.audio.transcriptions.create(
-                                model="whisper-1", 
-                                file=audio_file,
-                                language="en"
-                            )
-                        user_text = transcript.text
+                        user_text = get_transcription(audio_bytes, api_key)
                         st.success(f"**You said:** {user_text}")
                     except Exception as e:
                         st.error(f"Error during transcription: {e}")
-                
-                if os.path.exists(temp_audio_path):
-                    os.remove(temp_audio_path)
+                        user_text = None
                 
                 # 5. GPT-4o Evaluation
                 if user_text:
                     with st.spinner("AI is analyzing your description..."):
                         try:
-                            response = client.chat.completions.create(
-                                model="gpt-4o",
-                                response_format={"type": "json_object"},
-                                messages=[
-                                    {
-                                        "role": "system",
-                                        "content": (
-                                            "You are an encouraging English speaking tutor. "
-                                            "The user is describing the provided image. "
-                                            "Evaluate their description based on the image. "
-                                            "Provide the response in JSON format strictly with the following three keys:\n"
-                                            "1. 'content_feedback': A friendly feedback IN KOREAN evaluating how well their description matches the image, and kindly pointing out any important visual details they missed or described incorrectly.\n"
-                                            "2. 'main_correction': A VERY CONCISE, natural-sounding improved version of their description in English. Focus ONLY on the corrected sentence so the user can easily repeat after you.\n"
-                                            "3. 'other_expressions': A short list (array) of 2-3 other similar or useful English expressions."
-                                        )
-                                    },
-                                    {
-                                        "role": "user",
-                                        "content": [
-                                            {"type": "text", "text": f"Here is my transcription: '{user_text}'"},
-                                            {
-                                                "type": "image_url",
-                                                "image_url": {
-                                                    "url": image_url,
-                                                },
-                                            },
-                                        ],
-                                    }
-                                ],
-                                max_tokens=400,
-                            )
-                            raw_feedback = response.choices[0].message.content
+                            raw_feedback, prompt_tokens, completion_tokens = get_evaluation(user_text, image_url, api_key)
                             
                             try:
                                 feedback_data = json.loads(raw_feedback)
@@ -198,9 +214,6 @@ if news_items:
                                 main_correction = raw_feedback
                                 other_expressions = []
                             
-                            prompt_tokens = response.usage.prompt_tokens
-                            completion_tokens = response.usage.completion_tokens
-                            
                             st.subheader("💡 Feedback & Suggestions")
                             
                             if content_feedback:
@@ -208,26 +221,28 @@ if news_items:
                             
                             st.markdown(f"**🗣️ 모범 답안 (듣고 따라해 보세요!):**\n> {main_correction}")
                             
+                            # Play main correction
+                            main_tts_bytes = get_tts(main_correction, api_key)
+                            st.audio(main_tts_bytes, format="audio/mp3", autoplay=True)
+                            
                             if other_expressions:
                                 st.markdown("**✨ 유사한 표현들:**")
-                                for expr in other_expressions:
-                                    st.markdown(f"- {expr}")
+                                for i, expr in enumerate(other_expressions):
+                                    col_play, col_text = st.columns([1, 10])
+                                    with col_play:
+                                        if st.button("▶️ 재생", key=f"play_expr_{i}_{st.session_state.retry_key}"):
+                                            with st.spinner(""):
+                                                expr_tts_bytes = get_tts(expr, api_key)
+                                                b64 = base64.b64encode(expr_tts_bytes).decode()
+                                                md = f"""
+                                                    <audio autoplay="true">
+                                                    <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                                                    </audio>
+                                                    """
+                                                st.markdown(md, unsafe_allow_html=True)
+                                    with col_text:
+                                        st.markdown(f"- {expr}")
                             
-                            # 6. Audio Feedback (TTS) - Only speak the main correction
-                            with st.spinner("Generating audio feedback..."):
-                                tts_response = client.audio.speech.create(
-                                    model="tts-1",
-                                    voice="nova", # Friendly female voice
-                                    input=main_correction
-                                )
-                                # Save TTS to temp file
-                                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_tts:
-                                    for chunk in tts_response.iter_bytes():
-                                        temp_tts.write(chunk)
-                                    temp_tts_path = temp_tts.name
-                                
-                                st.audio(temp_tts_path, format="audio/mp3", autoplay=True)
-                                
                             # Cost Calculation
                             st.markdown("---")
                             whisper_cost = (duration_seconds / 60.0) * 0.006
@@ -237,7 +252,7 @@ if news_items:
                             total_cost_krw = total_cost_usd * 1350
                             
                             st.caption(f"💰 **Estimated Cost for this practice:** ${total_cost_usd:.4f} (약 {int(total_cost_krw)}원)")
-                            st.caption(f"*(Audio: {duration_seconds:.1f}s | Tokens: {prompt_tokens} in, {completion_tokens} out | TTS: {len(main_correction)} chars)*")
+                            st.caption(f"*(Audio: {duration_seconds:.1f}s | Tokens: {prompt_tokens} in, {completion_tokens} out | Main TTS: {len(main_correction)} chars)*")
                             
                         except Exception as e:
                             st.error(f"Error during AI analysis: {e}")
