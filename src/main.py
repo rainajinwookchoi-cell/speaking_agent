@@ -148,9 +148,10 @@ if news_items:
                                             "You are an encouraging English speaking tutor. "
                                             "The user is describing the provided image. "
                                             "Evaluate their description based on the image. "
-                                            "Provide the response in JSON format strictly with the following two keys:\n"
-                                            "1. 'main_correction': A VERY CONCISE, natural-sounding improved version of their description. Focus ONLY on the corrected sentence so the user can easily repeat after you.\n"
-                                            "2. 'other_expressions': A short list (array) of 2-3 other similar or useful expressions."
+                                            "Provide the response in JSON format strictly with the following three keys:\n"
+                                            "1. 'content_feedback': A friendly feedback IN KOREAN evaluating how well their description matches the image, and kindly pointing out any important visual details they missed or described incorrectly.\n"
+                                            "2. 'main_correction': A VERY CONCISE, natural-sounding improved version of their description in English. Focus ONLY on the corrected sentence so the user can easily repeat after you.\n"
+                                            "3. 'other_expressions': A short list (array) of 2-3 other similar or useful English expressions."
                                         )
                                     },
                                     {
@@ -172,9 +173,11 @@ if news_items:
                             
                             try:
                                 feedback_data = json.loads(raw_feedback)
+                                content_feedback = feedback_data.get('content_feedback', '')
                                 main_correction = feedback_data.get('main_correction', '')
                                 other_expressions = feedback_data.get('other_expressions', [])
                             except json.JSONDecodeError:
+                                content_feedback = ""
                                 main_correction = raw_feedback
                                 other_expressions = []
                             
@@ -182,10 +185,14 @@ if news_items:
                             completion_tokens = response.usage.completion_tokens
                             
                             st.subheader("💡 Feedback & Suggestions")
-                            st.markdown(f"**모범 답안 (듣고 따라해 보세요!):**\n> {main_correction}")
+                            
+                            if content_feedback:
+                                st.markdown(f"**🔍 내용 피드백:**\n{content_feedback}")
+                            
+                            st.markdown(f"**🗣️ 모범 답안 (듣고 따라해 보세요!):**\n> {main_correction}")
                             
                             if other_expressions:
-                                st.markdown("**유사한 표현들:**")
+                                st.markdown("**✨ 유사한 표현들:**")
                                 for expr in other_expressions:
                                     st.markdown(f"- {expr}")
                             

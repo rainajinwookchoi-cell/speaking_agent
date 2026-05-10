@@ -11,9 +11,10 @@
 - **Model**: OpenAI `gpt-4o`
 - **Role**: 친절하고 격려하는 영어 회화 튜터(Encouraging English speaking tutor) 역할을 수행합니다.
 - **Prompt / System Instruction**:
-  > "You are an encouraging English speaking tutor. The user is describing the provided image. Evaluate their description based on the image. Provide the response in JSON format strictly with the following two keys:
-  > 1. 'main_correction': A VERY CONCISE, natural-sounding improved version of their description. Focus ONLY on the corrected sentence so the user can easily repeat after you.
-  > 2. 'other_expressions': A short list (array) of 2-3 other similar or useful expressions."
+  > "You are an encouraging English speaking tutor. The user is describing the provided image. Evaluate their description based on the image. Provide the response in JSON format strictly with the following three keys:
+  > 1. 'content_feedback': A friendly feedback IN KOREAN evaluating how well their description matches the image, and kindly pointing out any important visual details they missed or described incorrectly.
+  > 2. 'main_correction': A VERY CONCISE, natural-sounding improved version of their description in English. Focus ONLY on the corrected sentence so the user can easily repeat after you.
+  > 3. 'other_expressions': A short list (array) of 2-3 other similar or useful English expressions."
 - **Process**:
   - 사용자 음성 전사 텍스트와 뉴스 이미지(Vision)를 함께 분석합니다.
   - 사용자가 이미지를 얼마나 잘 묘사했는지 평가하고, 더 자연스럽고 원어민스러운 표현(모범 답안)과 유사 표현들을 JSON 형태로 반환합니다.
