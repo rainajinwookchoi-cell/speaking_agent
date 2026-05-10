@@ -176,7 +176,10 @@ with tab_history:
             with st.expander(f"[{item['date']}] {item['main_correction'][:40]}..."):
                 col1, col2 = st.columns([1, 2])
                 with col1:
-                    st.image(item['image_url'], use_container_width=True)
+                    if item.get('news_title'):
+                        st.image(item['image_url'], use_container_width=True, caption=item['news_title'])
+                    else:
+                        st.image(item['image_url'], use_container_width=True)
                 with col2:
                     st.markdown(f"**🗣️ My Speech:** {item['user_text']}")
                     st.markdown(f"**🔍 Feedback:** {item['content_feedback']}")
@@ -300,6 +303,7 @@ with tab_practice:
                                     record = {
                                         "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                                         "image_url": image_url,
+                                        "news_title": news_title,
                                         "user_text": user_text,
                                         "content_feedback": content_feedback,
                                         "main_correction": main_correction,
