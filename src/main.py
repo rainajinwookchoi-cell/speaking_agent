@@ -181,6 +181,11 @@ with tab_history:
                     st.markdown(f"**🗣️ My Speech:** {item['user_text']}")
                     st.markdown(f"**🔍 Feedback:** {item['content_feedback']}")
                     st.markdown(f"**✅ Correction:** {item['main_correction']}")
+                    
+                    if item.get('main_tts_b64'):
+                        audio_bytes = base64.b64decode(item['main_tts_b64'])
+                        st.audio(audio_bytes, format="audio/mp3")
+                        
                     st.markdown("**✨ Other Expressions:**")
                     for expr in item['other_expressions']:
                         st.markdown(f"- {expr}")
@@ -298,7 +303,8 @@ with tab_practice:
                                         "user_text": user_text,
                                         "content_feedback": content_feedback,
                                         "main_correction": main_correction,
-                                        "other_expressions": other_expressions
+                                        "other_expressions": other_expressions,
+                                        "main_tts_b64": base64.b64encode(main_tts_bytes).decode('utf-8') if 'main_tts_bytes' in locals() else None
                                     }
                                     st.button("💾 이 피드백을 복습 기록에 저장하기", on_click=handle_save_history, args=(record,), use_container_width=True)
                                 else:
