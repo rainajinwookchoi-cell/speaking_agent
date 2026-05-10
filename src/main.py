@@ -122,6 +122,13 @@ def save_to_history(record):
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=4)
 
+def delete_from_history(index):
+    history = load_history()
+    if 0 <= index < len(history):
+        del history[index]
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f, ensure_ascii=False, indent=4)
+
 # 2. State Management & Fetch News
 @st.cache_data(ttl=3600)
 def fetch_all_news_images():
@@ -172,7 +179,9 @@ with tab_history:
     if not history_data:
         st.info("아직 저장된 복습 기록이 없습니다. Practice 탭에서 연습 후 저장해보세요!")
     else:
+        total_items = len(history_data)
         for idx, item in enumerate(reversed(history_data)):
+            original_idx = total_items - 1 - idx
             with st.expander(f"[{item['date']}] {item['main_correction'][:40]}..."):
                 col1, col2 = st.columns([1, 2])
                 with col1:
@@ -202,6 +211,9 @@ with tab_history:
                                 st.markdown(f"- {expr}")
                         else:
                             st.markdown(f"- {expr}")
+                            
+                    st.markdown("---")
+                    st.button("🗑️ 이 기록 삭제", key=f"del_hist_{original_idx}", on_click=delete_from_history, args=(original_idx,))
 
 with tab_practice:
     if news_items:
